@@ -1,7 +1,7 @@
 import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional, List
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Query
 from fastapi.security import OAuth2PasswordBearer
 import jwt
 from sqlalchemy.orm import Session
@@ -9,8 +9,8 @@ from backend.app.config import JWT_SECRET, JWT_ALGORITHM, ACCESS_TOKEN_EXPIRE_MI
 from backend.app.database import get_db
 from backend.app import models
 
-# OAuth2 scheme for retrieving the token
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+# OAuth2 scheme for retrieving the token (auto_error=False allows query param fallback)
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     try:
@@ -35,14 +35,23 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
+def get_current_user(
+    token_header: Optional[str] = Depends(oauth2_scheme),
+    token: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+) -> models.User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    
+    actual_token = token_header or token
+    if not actual_token:
+        raise credentials_exception
+        
     try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(actual_token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         email: str = payload.get("sub")
         if email is None:
             raise credentials_exception
